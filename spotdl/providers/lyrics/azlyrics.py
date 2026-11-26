@@ -72,23 +72,39 @@ class AzLyrics(LyricsProvider):
         if soup is None:
             return {}
 
-        td_tags = soup.find_all("td")
+        # Ensure we only operate on Tag instances to avoid NavigableString/None issues
+        from bs4.element import Tag
+
+        td_tags = [t for t in soup.find_all("td") if isinstance(t, Tag)]
         if len(td_tags) == 0:
             return {}
 
         results = {}
         for td_tag in td_tags:
-            a_tags = td_tag.find_all("a", href=True)
-            if len(a_tags) == 0:
+            # collect only Tag instances
+            a_tags = [a for a in td_tag.find_all("a", href=True) if isinstance(a, Tag)]
+            if not a_tags:
                 continue
 
-            a_tag = a_tags[0]
-            url = a_tag["href"].strip()
+            # get first anchor safely without indexing ResultSet directly
+            a_tag = next(iter(a_tags), None)
+            if a_tag is None:
+                continue
+
+            url = (a_tag.get("href") or "").strip()
             if url == "":
                 continue
 
-            title = td_tag.find("span").get_text().strip()
-            artist = td_tag.find("b").get_text().strip()
+            title_tag = td_tag.find("span")
+            artist_tag = td_tag.find("b")
+            if title_tag is None or artist_tag is None:
+                continue
+
+            title = (title_tag.get_text() or "").strip()
+            artist = (artist_tag.get_text() or "").strip()
+
+            if title == "" or artist == "":
+                continue
 
             results[f"{artist} - {title}"] = url
 
@@ -109,14 +125,19 @@ class AzLyrics(LyricsProvider):
         response = self.session.get(url)
         soup = BeautifulSoup(response.content, "html.parser")
 
-        # Find all divs that don't have a class
-        div_tags = soup.find_all("div", class_=False, id_=False)
+        from bs4.element import Tag
+
+        # Find all divs that don't have a class and ensure they are Tag instances with text
+        div_tags = [d for d in soup.find_all("div", class_=False, id_=False) if isinstance(d, Tag) and (d.get_text(strip=True) or "")]
+
+        if not div_tags:
+            return None
 
         # Find the div with the longest text
-        lyrics_div = sorted(div_tags, key=lambda x: len(x.text))[-1]
+        lyrics_div = max(div_tags, key=lambda x: len(x.get_text()))
 
         # extract lyrics from div and clean it up
-        lyrics = lyrics_div.get_text().strip()
+        lyrics = (lyrics_div.get_text() or "").strip()
 
         return lyrics
 
